@@ -1,0 +1,75 @@
+services:
+
+  mongodb:
+    image: mongo:8
+    container_name: greencart-mongodb
+    restart: unless-stopped
+
+    volumes:
+      - greencart_data:/data/db
+
+    networks:
+      - greencart-network
+
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+
+    container_name: greencart-backend
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      MONGODB_URI: mongodb://mongodb:27017/greencart
+
+      JWT_SECRET: ${JWT_SECRET}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      SELLER_EMAIL: ${SELLER_EMAIL}
+      SELLER_PASSWORD: ${SELLER_PASSWORD}
+
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+    networks:
+      - greencart-network
+
+
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+
+    container_name: greencart-frontend
+    restart: unless-stopped
+
+    depends_on:
+      - backend
+
+    ports:
+      - "80:80"
+
+    networks:
+      - greencart-network
+
+
+volumes:
+  greencart_data:
+
+
+networks:
+  greencart-network:
+    driver: bridge
