@@ -1,0 +1,177 @@
+# GreenCart Kubernetes Setup on a Fresh Machine
+
+This guide starts with creating a Kind cluster and deploys GreenCart from the repository.
+
+> Run commands from the repository root (`GreenCart/`). Docker, `kubectl`, and `kind` must already be installed, and Docker must be running. Never commit `.env` or Kubernetes Secret files to Git.
+
+## 1. Check tools and clone the repository
+
+```bash
+docker --version
+kubectl version --client
+kind version
+git clone https://github.com/sameersyed7/GreenCart.git
+cd GreenCart
+```
+
+If the repository is already cloned, just `cd` into it.
+
+## 2. Create the Kind cluster
+
+```bash
+kind create cluster --name audit --config kind/kind-config.yml
+kubectl cluster-info --context kind-audit
+kubectl wait --for=condition=Ready nodes --all --timeout=180s
+kubectl get nodes
+```
+
+The Kind config in this repository is intended to create three nodes and map host ports for Ingress.
+
+## 3. Install the NGINX Ingress controller
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+kubectl wait --namespace ingress-nginx --for=condition=Ready pod --selector=app.kubernetes.io/component=controller --timeout=180s
+kubectl get pods -n ingress-nginx
+kubectl get ingressclass
+```
+
+## 4. Create the namespace
+
+```bash
+kubectl apply -f k8s/01-namespace.yml
+kubectl get namespace greencart
+```
+
+## 5. Create the Kubernetes Secret safely
+
+The generated `k8s/05-secrets.yml` is excluded from Git. On a fresh machine, place your private `.env` file in the repository root. Do not display its contents or commit it.
+
+```bash
+test -f .env && echo ".env file found"
+kubectl create secret generic greencart-secrets --namespace greencart --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The Secret must be named `greencart-secrets`, as the backend Deployment expects that name. Ensure `.env` contains the environment variables your backend requires.
+
+## 6. Apply ConfigMaps and database storage
+
+```bash
+kubectl apply -f k8s/06-greencart-configmap.yml
+kubectl apply -f k8s/07-mongodb-configmap.yml
+kubectl apply -f k8s/08-mongodb-pvc.yml
+kubectl get pvc -n greencart
+```
+
+## 7. Deploy MongoDB
+
+```bash
+kubectl apply -f k8s/09-mongodb-deployment.yml
+kubectl apply -f k8s/10-mongodb-service.yml
+kubectl rollout status deployment/mongodb -n greencart --timeout=180s
+kubectl get pods,services -n greencart
+```
+
+## 8. Deploy the backend
+
+```bash
+kubectl apply -f k8s/04-backend-deployment.yml
+kubectl apply -f k8s/11-backend-service.yml
+kubectl rollout status deployment/backend-deployment -n greencart --timeout=180s
+```
+
+## 9. Deploy the frontend
+
+```bash
+kubectl apply -f k8s/02-frontend-deployment.yml
+kubectl apply -f k8s/03-frontend-service.yml
+kubectl rollout status deployment/frontend-deployment -n greencart --timeout=180s
+```
+
+The manifests currently refer to these images:
+
+- `syedsameer7/greencart-frontend:audit-v1`
+- `syedsameer7/greencart-backend:audit-v1`
+- `syedsameer7/greencart-mongo:latest`
+
+Make sure these tags exist in your image registry and are accessible from the new machine.
+
+## 10. Apply Ingress, RBAC, HPA, and CronJob
+
+```bash
+kubectl apply -f k8s/12-ingress.yml
+kubectl apply -f k8s/14-rbac.yml
+kubectl apply -f k8s/15-frontend-hpa.yml
+kubectl apply -f k8s/13-audit-cronjob.yml
+kubectl get ingress,hpa,cronjob -n greencart
+kubectl get serviceaccounts,roles,rolebindings -n greencart
+```
+
+If HPA metrics are unavailable, check:
+
+```bash
+kubectl top nodes
+kubectl top pods -n greencart
+```
+
+## 11. Verify the application
+
+```bash
+kubectl get pods -n greencart -o wide
+kubectl get deployments,services,pvc,ingress -n greencart
+kubectl get endpointslices -n greencart
+kubectl rollout status deployment/mongodb -n greencart --timeout=180s
+kubectl rollout status deployment/backend-deployment -n greencart --timeout=180s
+kubectl rollout status deployment/frontend-deployment -n greencart --timeout=180s
+```
+
+## 12. Test Ingress
+
+The Ingress host is `greencart.local`. Test it locally with:
+
+```bash
+curl -i -H 'Host: greencart.local' http://127.0.0.1/
+```
+
+A successful response should show an HTTP `2xx` status, such as `200 OK`.
+
+To use the hostname in a browser, add this line to the machine's hosts file:
+
+```text
+127.0.0.1 greencart.local
+```
+
+Linux hosts file: `/etc/hosts`. Windows hosts file: `C:\Windows\System32\drivers\etc\hosts` (edit as Administrator).
+
+## 13. Run the audit script
+
+If `audit.sh` is in the repository root:
+
+```bash
+chmod +x audit.sh
+REPO="$PWD" ./audit.sh greencart
+```
+
+The audit reports PASS, WARN, and FAIL. A warning about GitHub Actions means a Kind setup workflow may be missing; it does not necessarily mean the application is broken.
+
+## 14. Troubleshooting commands
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+kubectl get pods -n greencart -o wide
+kubectl describe pods -n greencart
+kubectl get events -n greencart --sort-by=.lastTimestamp
+kubectl logs deployment/backend-deployment -n greencart
+kubectl logs deployment/frontend-deployment -n greencart
+kubectl logs deployment/mongodb -n greencart
+kubectl get ingress -n greencart
+kubectl get pods -n ingress-nginx
+```
+
+## Important notes
+
+- Do not delete the Kind cluster if it contains data you need. Deleting it removes its Kubernetes resources and local database storage.
+- A fresh cluster starts with empty database storage. Data from another machine is not copied automatically.
+- Keep `.env`, generated Secret YAML, and credentials out of Git.
+- Check your current cluster context and namespace before applying manifests.
