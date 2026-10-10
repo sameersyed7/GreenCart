@@ -33,3 +33,7 @@ server/dist
 .env.test.local
 .env.production.local
 
+
+# Local Kubernetes secrets - never commit
+/k8s/05-secrets.yml
+/k8s/05-secrets.yml.backup

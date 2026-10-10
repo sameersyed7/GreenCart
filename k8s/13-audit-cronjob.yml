@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: greencart-audit-cronjob
+  namespace: greencart
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: audit-task
+              image: syedsameer7/greencart-backend:audit-v1
+              imagePullPolicy: IfNotPresent
+              command: ["node", "-e"]
+              args:
+                - "console.log('GreenCart Kubernetes audit CronJob ran successfully')"
